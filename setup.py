@@ -17,6 +17,8 @@ setup(
     install_requires=[
         'numpy',
         'scipy',
+        'imageio',
+        'psutil'
     ],
     classifiers=[
         'Development Status :: 3 - Alpha',
@@ -30,5 +32,5 @@ setup(
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
     ],
-    scripts=['convert360'],
+    scripts=['convert360', 'image2pano_folder.sh', 'pano2image_folder.sh'],
 )

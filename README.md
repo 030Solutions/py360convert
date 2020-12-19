@@ -1,15 +1,30 @@
+# Additions
+In addition to the library code we added 2 scripts:
+* pano2images_folder.sh: Reads all images from given folder and converts them with given parallelization
+  to a list of virtually rendered camera images usage:
+
+  `pano2images_folder.sh <path_to_input_folder> <path_to_output_folder> <desired_image_width> <num_parallel_processes>`
+
+  (for a system with 32 GB ram and 8000x4000 pixel panorama images `num_parallel_processes=16` is a good value)
+* image2pano_folder.sh: Inverted process of pano2images; Reads all images from given folder
+  and converts them with given parallelism to panorama images (images need to end with _left, _right, _front, _back, _top, _bottom)
+  
+  `image2pano_folder.sh <path_to_input_folder> <path_to_output_folder> <num_parallel_processes>`
+
+  (for a system with 32 GB ram and 8000x4000 pixel panorama images `num_parallel_processes=10` is a good value)
+
 # py360convert
 
 **A new library including more fuctionality for 360 is under contruction by my colleague. This repo will be depreciated then.**
 
 Features of this project:
-- Convertion between cubemap and equirectangular  
+- Convertion between cubemap or image list  and panoramic  
     ![](assert/teaser_convertion.png)
-- Equirectangular to planar  
+- panoramic to cubemap  
     ![](assert/teaser_2planar.png)
 - Pure python implementation and depend only on [numpy](http://www.numpy.org/) and [scipy](https://www.scipy.org/)
 - Vectorization implementation (in most of the place)
-    - `c2e` takes 300ms and `e2c` takes 160ms on 1.6 GHz Intel Core i5 CPU
+    - `cube2pano` takes 300ms and `pano2cube` takes 160ms on 1.6 GHz Intel Core i5 CPU
 
 ## Requirements
 - numpy

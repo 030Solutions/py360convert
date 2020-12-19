@@ -1,55 +1,151 @@
 #!/usr/bin/env python
 
 import argparse
+import gc
+
 import numpy as np
-from PIL import Image
+from pathlib import Path
+import os
+import imageio.v2 as imageio
+import psutil as psutil
 
 import py360convert
 
 
 # Parsing command line arguments
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-                                 description='Convertion between cubemap and equirectangular or equirectangular to perspective.')
-parser.add_argument('--convert', choices=['c2e', 'e2c', 'e2p'], required=True,
-                    help='What convertion to apply.')
-parser.add_argument('--i', required=True,
+                                 description='Conversion between cubemap and equirectangular or equirectangular to perspective.')
+parser.add_argument('--convert', choices=['cube2pano', 'pano2cube', 'pano2images', 'images2pano'], required=True,
+                    help='What conversion to apply.')
+parser.add_argument('-i', required=True,
                     help='Path to input image.')
-parser.add_argument('--o', required=True,
+parser.add_argument('-o', required=True,
                     help='Path to output image.')
-parser.add_argument('--w', required=True, type=int,
+parser.add_argument('--output_width', required=True, type=int,
                     help='Output width for c2e or e2p. Output cube faces width for e2c.')
-parser.add_argument('--h', type=int,
+parser.add_argument('--output_height', type=int,
                     help='Output height for c2e or e2p.')
 parser.add_argument('--mode', default='bilinear', choices=['bilinear', 'nearest'],
                     help='Resampling method.')
-parser.add_argument('--h_fov', type=float, default=60,
-                    help='Horizontal field of view for e2p.')
-parser.add_argument('--v_fov', type=float, default=60,
-                    help='Vertical field of view for e2p.')
-parser.add_argument('--u_deg', type=float, default=0,
-                    help='Horizontal viewing angle for e2p.')
-parser.add_argument('--v_deg', type=float, default=0,
-                    help='Vertical viewing angle for e2p.')
-parser.add_argument('--in_rot_deg', type=float, default=0,
-                    help='Inplane rotation for e2p.')
 args = parser.parse_args()
-
-
-# Read image
-img = np.array(Image.open(args.i))
-if len(img.shape) == 2:
-    img = img[..., None]
-
 # Convert
-if args.convert == 'c2e':
-    out = py360convert.c2e(img, h=args.h, w=args.w, mode=args.mode)
-elif args.convert == 'e2c':
-    out = py360convert.e2c(img, face_w=args.w, mode=args.mode)
-elif args.convert == 'e2p':
-    out = py360convert.e2p(img, fov_deg=(args.h_fov, args.v_fov), u_deg=args.u_deg, v_deg=args.v_deg,
-                           out_hw=(args.h, args.w), in_rot_deg=args.in_rot_deg, mode=args.mode)
-else:
-    raise NotImplementedError('Unknown convertion')
+if args.convert == 'cube2pano':
+    # Read image
+    img = imageio.imread(args.i, 'PNG-PIL')
+    if len(img.shape) == 2:
+        img = img[..., None]
 
-# Output image
-Image.fromarray(out.astype(np.uint8)).save(args.o)
+    # Convert to panoramic
+    out = py360convert.c2e(img, h=args.output_height, w=args.output_width, mode=args.mode)
+
+    # Output image to disc
+    imageio.imwrite(args.o, out, 'PNG-PIL')
+
+elif args.convert == 'pano2cube':
+    # Read image
+    img = imageio.imread(args.i, 'PNG-PIL')
+    if len(img.shape) == 2:
+        img = img[..., None]
+
+    # Convert to cube images
+    out = py360convert.e2c(img, face_w=args.output_width, mode=args.mode)
+
+    # Output image to disc
+    imageio.imwrite(args.o, out, 'PNG-PIL')
+
+elif args.convert == 'images2pano':
+    # Extract basename and extension from the input image name. We assume that the user passes the left image and
+    # that it follows the naming convention below.
+    p = Path(args.i)
+    # filename should only contain
+    if not ('.png' in p.suffixes or '.jpg' in p.suffixes) or not 'left' in str(p.stem):
+        print("did not find png or jpg in " + str(p.suffixes) + " in suffixes or left in " + p.stem) 
+        exit()
+    
+    preleft, postleft = str(p.stem).split('_left')
+    preleft = str(p.parent) + "/" + preleft
+    postleft = postleft + p.suffixes[0]
+
+    if '.png' in p.suffixes:
+        img_left = imageio.imread(args.i, 'PNG-PIL')
+    else:
+        img_left = imageio.imread(args.i)
+    assert(img_left.shape[0] == img_left.shape[1])
+    w = img_left.shape[0]
+
+    # Create an empty array
+    # num_channels
+    if len(img_left.shape) == 3:
+        img = np.zeros((w * 3, w * 4, img_left.shape[-1]), dtype=img_left.dtype)
+
+        # Fill it with the images:
+        img[1 * w: 2 * w, 0 * w: 1 * w, :] = np.array(imageio.imread(preleft + "_left" + postleft))
+        img[1 * w: 2 * w, 1 * w: 2 * w, :] = np.array(imageio.imread(preleft + "_back" + postleft))
+        img[1 * w: 2 * w, 2 * w: 3 * w, :] = np.array(imageio.imread(preleft + "_right" + postleft))
+        img[1 * w: 2 * w, 3 * w: 4 * w, :] = np.array(imageio.imread(preleft + "_front" + postleft))
+        img[0 * w: 1 * w, 1 * w: 2 * w, :] = np.array(imageio.imread(preleft + "_top" + postleft))
+        img[2 * w: 3 * w, 1 * w: 2 * w, :] = np.array(imageio.imread(preleft + "_bottom" + postleft))
+    else: # only black and white:
+        img = np.zeros((w * 3, w * 4, 1), dtype=img_left.dtype)
+
+        # Fill it with the images:
+        img[1 * w: 2 * w, 0 * w: 1 * w, 0] = np.array(
+            imageio.imread(preleft + "_left" + postleft))
+        img[1 * w: 2 * w, 1 * w: 2 * w, 0] = np.array(
+            imageio.imread(preleft + "_back" + postleft))
+        img[1 * w: 2 * w, 2 * w: 3 * w, 0] = np.array(
+            imageio.imread(preleft + "_right" + postleft))
+        img[1 * w: 2 * w, 3 * w: 4 * w, 0] = np.array(
+            imageio.imread(preleft + "_front" + postleft))
+        img[0 * w: 1 * w, 1 * w: 2 * w, 0] = np.array(
+            imageio.imread(preleft + "_top" + postleft))
+        img[2 * w: 3 * w, 1 * w: 2 * w, 0] = np.array(
+            imageio.imread(preleft + "_bottom" + postleft))
+
+    # Conversion to panoramic
+    if not args.output_height or not args.output_width:
+        print("Error! For mode \"images2pano\" --output_height and --output_width are required! Exiting!")
+        exit()
+    out = py360convert.c2e(img, h=args.output_height, w=args.output_width, mode=args.mode)
+
+    # Output image to disk
+    if '.png' in p.suffixes:
+         imageio.imwrite(args.o, out.astype(img_left.dtype), 'PNG-PIL')
+    else:
+        imageio.imwrite(args.o, out.astype(img_left.dtype))
+    print("done", args.i)
+
+elif args.convert == 'pano2images':
+    # Read image
+    img = imageio.imread(args.i)
+    if len(img.shape) == 2:
+        img = img[..., None]
+
+    # Convert to cube images
+    out = py360convert.e2c(img, face_w=args.output_width, mode=args.mode)
+    print("deleting image, ram usage:", psutil.virtual_memory().percent)
+    del img
+    print("deleted image, ram usage:", psutil.virtual_memory().percent)
+    n = gc.collect()
+    print("garbage collected, ram usage:", psutil.virtual_memory().percent)
+    # Splice and export all sides of the cube
+    w = args.output_width
+    left   = out[1 * w: 2 * w, 0 * w: 1 * w, :]
+    back   = out[1 * w: 2 * w, 1 * w: 2 * w, :]
+    right  = out[1 * w: 2 * w, 2 * w: 3 * w, :]
+    front  = out[1 * w: 2 * w, 3 * w: 4 * w, :]
+    top    = out[0 * w: 1 * w, 1 * w: 2 * w, :]
+    bottom = out[2 * w: 3 * w, 1 * w: 2 * w, :]
+    print("spliced")
+    # Export to disk
+    basename, extension = os.path.splitext(args.o)
+    imageio.imwrite(basename + "_left" + extension, left)
+    imageio.imwrite(basename + "_back" + extension, back)
+    imageio.imwrite(basename + "_right" + extension, right)
+    imageio.imwrite(basename + "_front" + extension, front)
+    imageio.imwrite(basename + "_top" + extension, top)
+    imageio.imwrite(basename + "_bottom" + extension, bottom)
+    print("saved")
+else:
+    raise NotImplementedError('Unknown conversion')
+
